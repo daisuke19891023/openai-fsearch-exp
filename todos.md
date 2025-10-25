@@ -6,12 +6,12 @@
 
 ## EP1 – Domain Model Foundation
 - [x] T1-1: Implement `domain.models` per MVP specification with round-trip tests.
-- [ ] T1-2: Build YAML/ENV config loader for run and scenario definitions.
+- [x] T1-2: Build YAML/ENV config loader for run and scenario definitions.
 
 ## EP2 – Shell Tool Wrappers
-- [ ] T2-1: Implement ripgrep wrapper returning structured matches.
-- [ ] T2-2: Implement fd wrapper with gitignore-aware behavior.
-- [ ] T2-3: Provide grep/find wrappers for baseline comparisons.
+- [x] T2-1: Implement ripgrep wrapper returning structured matches.
+- [x] T2-2: Implement fd wrapper with gitignore-aware behavior.
+- [x] T2-3: Provide grep/find wrappers for baseline comparisons.
 
 ## EP3 – Chunking & Embeddings
 - [ ] T3-1: Implement fixed-token chunker.

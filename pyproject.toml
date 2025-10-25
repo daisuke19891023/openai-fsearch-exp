@@ -1,23 +1,33 @@
 [project]
-name = "template-project-placeholder"
+name = "code-agent-experiments"
 version = "0.1.0"
-description = "Template project placeholder description"
+description = "LLM tool-use experiments for code file discovery"
 readme = "README.md"
 requires-python = ">=3.13"
+authors = [{ name = "Your Name" }]
 dependencies = [
     "python-dotenv>=1.1.1",
     "pydantic>=2.12.3",
     "pydantic-settings>=2.11.0",
     "ulid>=1.1",
-] # Update as needed for real project requirements
-
-[project.scripts]
-template-project-placeholder = "template_package.main:main"  # Replace with actual entry point
+    "openai>=1.0.0",
+    "openai-agents>=0.4.0",
+    "typer>=0.12",
+    "rich>=13",
+    "orjson>=3",
+    "faiss-cpu>=1.7.0",
+    "chromadb>=0.5.0",
+    "pgvector>=0.2.0",
+    "tree-sitter>=0.23.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "jinja2>=3.1",
+]
 
 [project.optional-dependencies]
 dev = [
     "uv[dev]>=0.9.5",
-    "nox>=2025.10.16",
+    "nox>=2024.4.15",
     "ruff>=0.14.1",
     "pyright>=1.1.406",
     "pip-audit>=2.9.0",
@@ -38,6 +48,10 @@ dev = [
     "pdm>=2.26.0",
     "pre-commit>=4.3.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.uv]
 # Install dev dependencies with 'uv sync --extra dev' or 'uv pip install -e .[dev]'
@@ -118,8 +132,6 @@ exclude = [
     "dist",
 ]
 stubPath = "typings"
-venvPath = "."
-venv = ".venv"
 typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
 reportMissingImports = true

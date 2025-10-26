@@ -24,7 +24,7 @@
 - [ ] T4-3: Integrate pgvector backend (optional).
 
 ## EP5 – Reranking (Optional)
-- [ ] T5-1: Add cross-encoder reranker pipeline stage.
+- [x] T5-1: Add cross-encoder reranker pipeline stage.
 
 ## EP6 – Responses API Integration
 - [ ] T6-1: Register tool schemas and handle tool calls via Responses API.

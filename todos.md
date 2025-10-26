@@ -42,7 +42,7 @@
 - [ ] T9-2: Provide baseline experiment profiles.
 
 ## EP10 – SWE-bench Importer
-- [ ] T10-1: Ingest SWE-bench scenarios into internal format.
+- [x] T10-1: Ingest SWE-bench scenarios into internal format.
 
 ## EP11 – Operational Safety
 - [ ] T11-1: Add binary/version checks and graceful errors for missing tools.

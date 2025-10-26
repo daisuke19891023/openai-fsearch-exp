@@ -1,5 +1,6 @@
-"""Installation helpers for third-party CLI tools used in experiments."""
+"""Setup utilities for Code Agent Experiments."""
 
-__all__ = ["install_tools"]
+__all__ = ["ingest_swe_bench_scenarios", "install_tools"]
 
 from .install_tools import install_tools
+from .swe_bench import ingest_swe_bench_scenarios

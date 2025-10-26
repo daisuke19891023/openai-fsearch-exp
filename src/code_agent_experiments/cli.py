@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from openai import OpenAI
@@ -12,7 +13,9 @@ from rich.console import Console
 from .agent import ResponsesAgent
 from .agent.builtin_tools import create_ripgrep_tool
 from .agent.tooling import ToolRegistry
-from .domain.models import ToolLimits
+from .domain.models import Metrics, ReportSummary, ToolLimits
+from .evaluation.metrics import aggregate_metrics
+from .evaluation.reporting import render_html_report, render_markdown_report
 
 app = typer.Typer(help="Run single-shot code agent experiments against a repository.")
 console = Console()
@@ -39,6 +42,54 @@ MAX_CALLS_OPTION = typer.Option(
     min=1,
     help="Maximum number of tool calls permitted in a single run.",
 )
+METRICS_FILE_ARGUMENT = typer.Argument(
+    ...,
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    readable=True,
+    resolve_path=True,
+    help="Path to a metrics JSON or JSONL file.",
+)
+
+REPORT_OUTPUT_OPTION = typer.Option(
+    Path("cae-report.md"),
+    "--output",
+    "-o",
+    dir_okay=False,
+    help="Path where the generated report should be written.",
+)
+
+FORMAT_OPTION = typer.Option(
+    "markdown",
+    "--format",
+    "-f",
+    case_sensitive=False,
+    help="Report output format: 'markdown' or 'html'.",
+)
+
+
+def _load_metrics(metrics_file: Path) -> list[Metrics]:
+    text = metrics_file.read_text(encoding="utf-8")
+    try:
+        payload: Any = json.loads(text)
+    except json.JSONDecodeError:
+        payload = [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    metrics: list[Metrics]
+    if isinstance(payload, dict) and "per_scenario" in payload:
+        summary = ReportSummary.model_validate(payload)
+        metrics = summary.per_scenario
+    elif isinstance(payload, list):
+        items = cast(list[Any], payload)
+        metrics = [Metrics.model_validate(item) for item in items]
+    else:
+        message = "Metrics input must be JSONL, JSON array, or a serialized ReportSummary."
+        raise typer.BadParameter(message)
+    if not metrics:
+        message = "No metrics found in the provided file."
+        raise typer.BadParameter(message)
+    return metrics
 
 
 @app.command()
@@ -83,6 +134,37 @@ def query(
             console.print(f"    Output preview: {call.stdout_preview[:200]}")
     if result.limit_reached:
         console.print("[yellow]Tool call limit reached before the response completed.[/yellow]")
+
+
+@app.command()
+def report(
+    metrics_file: Path = METRICS_FILE_ARGUMENT,
+    output: Path = REPORT_OUTPUT_OPTION,
+    report_format: str = FORMAT_OPTION,
+) -> None:
+    """Generate an evaluation report from stored metrics."""
+    metrics = _load_metrics(metrics_file)
+    run_ids = {metric.run_id for metric in metrics}
+    if len(run_ids) != 1:
+        message = "Metrics must originate from a single run."
+        raise typer.BadParameter(message)
+
+    summary = ReportSummary(
+        run_id=run_ids.pop(),
+        per_scenario=list(metrics),
+        aggregates=aggregate_metrics(metrics),
+    )
+
+    fmt = report_format.lower()
+    if fmt == "markdown":
+        output = render_markdown_report(summary, output)
+    elif fmt == "html":
+        output = render_html_report(summary, output)
+    else:
+        message = "Unsupported format. Choose 'markdown' or 'html'."
+        raise typer.BadParameter(message)
+
+    console.print(f"[green]Report written to {output}[/green]")
 
 
 def main() -> None:  # pragma: no cover - Typer entry point

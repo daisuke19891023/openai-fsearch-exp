@@ -1,0 +1,29 @@
+# Code Agent Experiments Report
+
+## Run Summary
+- **Run ID:** {{ summary.run_id }}
+- **Scenarios:** {{ summary.aggregates.scenario_count }}
+- **Mean MRR:** {{ '%.3f' % summary.aggregates.mean_mrr }}
+- **Total Tool Calls:** {{ summary.aggregates.total_tool_calls }}
+- **Total Wall Time (ms):** {{ summary.aggregates.total_wall_ms }}
+- **Total Cost (USD):** {{ 'N/A' if summary.aggregates.total_cost_usd is none else '%.2f' % summary.aggregates.total_cost_usd }}
+
+### Average Recall and nDCG
+| K | Recall | nDCG |
+| --- | --- | --- |
+{% for k in summary.aggregates.avg_recall_at_k.keys()|list|sort %}
+| {{ k }} | {{ '%.3f' % summary.aggregates.avg_recall_at_k[k] }} | {{ '%.3f' % summary.aggregates.avg_ndcg_at_k[k] }} |
+{% endfor %}
+
+## Per Scenario Metrics
+{% for metrics in summary.per_scenario %}
+### Scenario {{ metrics.scenario_id }}
+- **Strategy:** {{ metrics.strategy }}
+- **Recall@K:** {% for k in metrics.k_values %}K={{ k }}: {{ '%.3f' % metrics.recall_at_k[k] }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **nDCG@K:** {% for k in metrics.k_values %}K={{ k }}: {{ '%.3f' % metrics.ndcg_at_k[k] }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **MRR:** {{ '%.3f' % metrics.mrr }}
+- **Tool Calls:** {{ metrics.tool_calls }}
+- **Wall Time (ms):** {{ metrics.wall_ms }}
+{% if metrics.cost_usd is not none %}- **Cost (USD):** {{ '%.2f' % metrics.cost_usd }}{% endif %}
+
+{% endfor %}

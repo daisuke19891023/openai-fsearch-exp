@@ -175,17 +175,17 @@ class CrossEncoderReranker:
         if not isinstance(raw, dict):
             message = "Reranker response must be a JSON object"
             raise RerankerError(message)
-        data = t.cast(dict[str, Any], raw)
+        data = t.cast("dict[str, Any]", raw)
         scores = data.get("scores")
         if not isinstance(scores, list):
             message = "Reranker response missing 'scores' array"
             raise RerankerError(message)
         parsed: dict[str, float] = {}
-        iterable_scores = t.cast(t.Iterable[object], scores)
+        iterable_scores = t.cast("t.Iterable[object]", scores)
         for entry in iterable_scores:
             if not isinstance(entry, dict):
                 continue
-            entry_dict = t.cast(dict[str, Any], entry)
+            entry_dict = t.cast("dict[str, Any]", entry)
             identifier = entry_dict.get("id")
             score = entry_dict.get("score")
             if isinstance(identifier, str) and isinstance(score, (int, float)):

@@ -22,9 +22,11 @@ from .domain.models import Metrics, ReportSummary, ToolLimits
 from .evaluation.metrics import aggregate_metrics
 from .evaluation.reporting import render_html_report, render_markdown_report
 from .orchestration import ExperimentOrchestrator, ExperimentStorage, default_executor
+from .tools import warn_if_missing_binaries
 
 app = typer.Typer(help="Run single-shot code agent experiments against a repository.")
 console = Console()
+warn_if_missing_binaries(console=console)
 
 PROMPT_ARGUMENT = typer.Argument(
     ...,

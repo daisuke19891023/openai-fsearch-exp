@@ -12,6 +12,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
     from code_agent_experiments.domain.models import ToolName
 
+MAX_TEXT_MATCHES = 5_000
+"""Maximum number of textual matches returned by search utilities."""
+
+MAX_PATH_RESULTS = 1_000
+"""Maximum number of filesystem paths returned by discovery utilities."""
+
 __all__ = [
     "BinaryNotFoundError",
     "RipgrepMatch",
@@ -80,6 +86,7 @@ def run_ripgrep(
         for path in _iter_target_paths(root, hidden=True, include_dirs=False, follow_symlinks=False)
         if path.is_file()
     )
+    max_allowed = MAX_TEXT_MATCHES if max_count is None else min(max_count, MAX_TEXT_MATCHES)
     matches: list[RipgrepMatch] = []
     for file_path in candidates:
         if globs and not _matches_glob(file_path, globs, search_root):
@@ -100,7 +107,7 @@ def run_ripgrep(
                     submatches=tuple(match.group(0) for match in found),
                 ),
             )
-            if max_count is not None and len(matches) >= max_count:
+            if len(matches) >= max_allowed:
                 return matches
     return matches
 def run_fd(
@@ -117,6 +124,7 @@ def run_fd(
     search_root, _ = _resolve_root(root)
     gitignore_patterns = _load_gitignore(search_root)
     pattern_lower = pattern.lower()
+    effective_limit = MAX_PATH_RESULTS if limit is None else min(limit, MAX_PATH_RESULTS)
     results: list[Path] = []
     for candidate in _iter_target_paths(
         root,
@@ -136,19 +144,23 @@ def run_fd(
             continue
         if pattern_lower in relative.name.lower():
             results.append(candidate)
-            if limit is not None and len(results) >= limit:
+            if len(results) >= effective_limit:
                 break
     if not include_directories:
         results = [path for path in results if path.is_file()]
+    if limit is None and len(results) > MAX_PATH_RESULTS:
+        return results[:MAX_PATH_RESULTS]
     return results
 def run_grep(
     pattern: str,
     root: Path,
     *,
     ignore_case: bool = False,
+    max_count: int | None = None,
 ) -> list[RipgrepMatch]:
     """Perform a simple substring search similar to ``grep -nR``."""
     needle = pattern.lower() if ignore_case else pattern
+    max_allowed = MAX_TEXT_MATCHES if max_count is None else min(max_count, MAX_TEXT_MATCHES)
     matches: list[RipgrepMatch] = []
     for file_path in _iter_target_paths(root, hidden=False, include_dirs=False, follow_symlinks=False):
         if not file_path.is_file():
@@ -168,6 +180,8 @@ def run_grep(
                         submatches=(pattern,),
                     ),
                 )
+                if len(matches) >= max_allowed:
+                    return matches
     return matches
 def run_find(
     root: Path,
@@ -192,7 +206,10 @@ def run_find(
             continue
         if not include_directories and candidate.is_dir():
             continue
-        results.append(candidate)
+        if len(results) < MAX_PATH_RESULTS:
+            results.append(candidate)
+        if len(results) >= MAX_PATH_RESULTS:
+            break
     if not include_directories:
         results = [path for path in results if path.is_file()]
     return results

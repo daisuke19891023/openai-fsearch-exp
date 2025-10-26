@@ -32,3 +32,31 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Re-run the script with `--force` to reinstall or `--tools ripgrep fd` to install
 a subset of tools.
+
+## Running the CLI
+
+Execute a single-shot agent search against a repository with:
+
+```bash
+uv run cae query "Find TODO markers" --repo /path/to/repository
+```
+
+By default the command uses the Responses API backend. Switch to the
+Agents SDK implementation and export traces to the OpenAI dashboard by
+providing the `--driver agents` flag (ensure `OPENAI_API_KEY` is set in
+your environment):
+
+```bash
+uv run cae query \
+  --driver agents \
+  --workflow-name code-agent-experiments.demo \
+  "Audit TODO, FIXME, and NOTE markers across the repository" \
+  --repo /path/to/repository
+```
+
+The Agents SDK runner registers the local `ripgrep` tool, enforces the
+configured tool-call limit, and emits telemetry that appears under the
+specified workflow name in the Traces UI. A single run that inspects
+multiple patterns (as in the example above) will surface three or more
+tool executions in the trace timeline. Disable trace export locally with
+`--disable-trace` when experimentation data should remain on disk.

@@ -31,7 +31,7 @@
 - [x] T6-2: Support iterative loops with tool limit enforcement and logging.
 
 ## EP7 – Agents SDK Integration (Optional)
-- [ ] T7-1: Expose tools via Agents SDK with trace visualization.
+- [x] T7-1: Expose tools via Agents SDK with trace visualization.
 
 ## EP8 – Evaluation Suite
 - [ ] T8-1: Implement metrics calculations (Recall@K, nDCG@K, MRR).

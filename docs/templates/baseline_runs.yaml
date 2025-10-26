@@ -1,0 +1,72 @@
+runs:
+  - id: rg-only
+    description: Ripgrep-only keyword baseline
+    model:
+      name: gpt-4.1-mini
+      temperature: 0.0
+    tools_enabled:
+      - ripgrep
+    chunking:
+      type: fixed
+      size_tokens: 256
+      overlap_tokens: 64
+      languages:
+        - python
+    tool_limits:
+      max_calls: 8
+      per_call_timeout_sec: 20
+    seed: 7
+    replicate: 3
+
+  - id: faiss-fixed
+    description: Ripgrep plus FAISS dense retrieval with fixed chunks
+    model:
+      name: gpt-4.1-mini
+      temperature: 0.0
+    tools_enabled:
+      - ripgrep
+      - vector.faiss
+    chunking:
+      type: fixed
+      size_tokens: 400
+      overlap_tokens: 80
+      languages:
+        - python
+    vector:
+      backend: faiss
+      index_path: .index/faiss
+      metric: cosine
+    tool_limits:
+      max_calls: 12
+      per_call_timeout_sec: 20
+    seed: 11
+    replicate: 3
+
+  - id: hybrid
+    description: Hybrid keyword + FAISS + fd traversal baseline
+    model:
+      name: gpt-4.1-mini
+      temperature: 0.0
+    tools_enabled:
+      - ripgrep
+      - fd
+      - vector.faiss
+    chunking:
+      type: fixed
+      size_tokens: 400
+      overlap_tokens: 80
+      languages:
+        - python
+        - javascript
+    vector:
+      backend: faiss
+      index_path: .index/faiss
+      metric: cosine
+    reranker:
+      name: bge-reranker-v2-m3
+      top_k: 75
+    tool_limits:
+      max_calls: 16
+      per_call_timeout_sec: 25
+    seed: 17
+    replicate: 3

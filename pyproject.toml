@@ -24,6 +24,9 @@ dependencies = [
     "jinja2>=3.1",
 ]
 
+[project.scripts]
+cae = "code_agent_experiments.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "uv[dev]>=0.9.5",

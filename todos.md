@@ -27,8 +27,8 @@
 - [x] T5-1: Add cross-encoder reranker pipeline stage.
 
 ## EP6 – Responses API Integration
-- [ ] T6-1: Register tool schemas and handle tool calls via Responses API.
-- [ ] T6-2: Support iterative loops with tool limit enforcement and logging.
+- [x] T6-1: Register tool schemas and handle tool calls via Responses API.
+- [x] T6-2: Support iterative loops with tool limit enforcement and logging.
 
 ## EP7 – Agents SDK Integration (Optional)
 - [ ] T7-1: Expose tools via Agents SDK with trace visualization.

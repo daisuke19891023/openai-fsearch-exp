@@ -34,8 +34,8 @@
 - [ ] T7-1: Expose tools via Agents SDK with trace visualization.
 
 ## EP8 – Evaluation Suite
-- [ ] T8-1: Implement metrics calculations (Recall@K, nDCG@K, MRR).
-- [ ] T8-2: Generate Markdown/HTML reports.
+- [x] T8-1: Implement metrics calculations (Recall@K, nDCG@K, MRR).
+- [x] T8-2: Generate Markdown/HTML reports.
 
 ## EP9 – Experiment Orchestration
 - [ ] T9-1: Implement scenario runner with persistence.

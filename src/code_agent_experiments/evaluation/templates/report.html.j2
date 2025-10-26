@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Code Agent Experiments Report</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      table { border-collapse: collapse; margin-bottom: 1.5rem; }
+      th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+      h1, h2, h3 { color: #222; }
+      .scenario { margin-bottom: 2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Code Agent Experiments Report</h1>
+    <section>
+      <h2>Run Summary</h2>
+      <ul>
+        <li><strong>Run ID:</strong> {{ summary.run_id }}</li>
+        <li><strong>Scenarios:</strong> {{ summary.aggregates.scenario_count }}</li>
+        <li><strong>Mean MRR:</strong> {{ '%.3f' % summary.aggregates.mean_mrr }}</li>
+        <li><strong>Total Tool Calls:</strong> {{ summary.aggregates.total_tool_calls }}</li>
+        <li><strong>Total Wall Time (ms):</strong> {{ summary.aggregates.total_wall_ms }}</li>
+        <li><strong>Total Cost (USD):</strong> {{ 'N/A' if summary.aggregates.total_cost_usd is none else '%.2f' % summary.aggregates.total_cost_usd }}</li>
+      </ul>
+      <h3>Average Recall and nDCG</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>K</th>
+            <th>Recall</th>
+            <th>nDCG</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for k in summary.aggregates.avg_recall_at_k.keys()|list|sort %}
+          <tr>
+            <td>{{ k }}</td>
+            <td>{{ '%.3f' % summary.aggregates.avg_recall_at_k[k] }}</td>
+            <td>{{ '%.3f' % summary.aggregates.avg_ndcg_at_k[k] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Per Scenario Metrics</h2>
+      {% for metrics in summary.per_scenario %}
+      <div class="scenario">
+        <h3>Scenario {{ metrics.scenario_id }}</h3>
+        <ul>
+          <li><strong>Strategy:</strong> {{ metrics.strategy }}</li>
+          <li><strong>Recall@K:</strong>
+            {% for k in metrics.k_values %}
+              K={{ k }}: {{ '%.3f' % metrics.recall_at_k[k] }}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </li>
+          <li><strong>nDCG@K:</strong>
+            {% for k in metrics.k_values %}
+              K={{ k }}: {{ '%.3f' % metrics.ndcg_at_k[k] }}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </li>
+          <li><strong>MRR:</strong> {{ '%.3f' % metrics.mrr }}</li>
+          <li><strong>Tool Calls:</strong> {{ metrics.tool_calls }}</li>
+          <li><strong>Wall Time (ms):</strong> {{ metrics.wall_ms }}</li>
+          {% if metrics.cost_usd is not none %}
+          <li><strong>Cost (USD):</strong> {{ '%.2f' % metrics.cost_usd }}</li>
+          {% endif %}
+        </ul>
+      </div>
+      {% endfor %}
+    </section>
+  </body>
+</html>

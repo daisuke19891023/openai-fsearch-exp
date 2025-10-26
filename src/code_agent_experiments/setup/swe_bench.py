@@ -125,18 +125,18 @@ def _load_instances(json_path: str | Path) -> list[SWEbenchInstance]:
 
     candidates: list[dict[str, Any]]
     if isinstance(payload, list):
-        candidates = cast(list[dict[str, Any]], payload)
+        candidates = cast("list[dict[str, Any]]", payload)
     elif isinstance(payload, dict):
-        mapping = cast(dict[str, Any], payload)
+        mapping = cast("dict[str, Any]", payload)
         maybe_items = mapping.get("instances") or mapping.get("items")
         if isinstance(maybe_items, list):
-            candidates = cast(list[dict[str, Any]], maybe_items)
+            candidates = cast("list[dict[str, Any]]", maybe_items)
         else:
             message = "SWE-bench JSON must contain a list of instances"
-            raise ValueError(message)
+            raise TypeError(message)
     else:
         message = "Unsupported SWE-bench JSON structure"
-        raise ValueError(message)
+        raise TypeError(message)
 
     instances: list[SWEbenchInstance] = []
     for index, item in enumerate(candidates):

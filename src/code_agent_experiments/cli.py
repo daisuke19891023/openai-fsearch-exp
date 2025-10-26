@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import typer
 from openai import OpenAI
 from rich.console import Console
+from rich.table import Table
 
 from .agent import ResponsesAgent
 from .agent.builtin_tools import create_ripgrep_tool
 from .agent.tooling import ToolRegistry
+from .config import load_run_configs, load_scenarios
 from .domain.models import Metrics, ReportSummary, ToolLimits
 from .evaluation.metrics import aggregate_metrics
 from .evaluation.reporting import render_html_report, render_markdown_report
+from .orchestration import RunSummary, ScenarioRunner
 
 app = typer.Typer(help="Run single-shot code agent experiments against a repository.")
 console = Console()
@@ -68,6 +71,80 @@ FORMAT_OPTION = typer.Option(
     help="Report output format: 'markdown' or 'html'.",
 )
 
+RUNS_OPTION = typer.Option(
+    ...,
+    "--runs",
+    "-c",
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    resolve_path=True,
+    help="Path to the run configuration YAML file.",
+)
+SCENARIOS_OPTION = typer.Option(
+    ...,
+    "--scenarios",
+    "-s",
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    resolve_path=True,
+    help="Path to the scenarios YAML file.",
+)
+OUTPUT_DIR_OPTION = typer.Option(
+    Path("artifacts"),
+    "--output-dir",
+    "-o",
+    dir_okay=True,
+    file_okay=False,
+    resolve_path=True,
+    help="Directory where retrieval records and metrics will be stored.",
+)
+
+if TYPE_CHECKING:
+    _ENV_OPTION: Any = None
+else:
+    _ENV_OPTION = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Optional .env file(s) applied to both run and scenario configurations.",
+    )
+
+
+def _render_summary_table(summaries: Sequence[RunSummary]) -> None:
+    """Print a Rich table comparing aggregate metrics across runs."""
+    table = Table(title="Run Comparison")
+    table.add_column("Run ID", style="bold")
+    table.add_column("Strategy")
+    table.add_column("Scenarios", justify="right")
+    table.add_column("Recall@5", justify="right")
+    table.add_column("Recall@10", justify="right")
+    table.add_column("MRR", justify="right")
+
+    for summary in summaries:
+        aggregates = summary.aggregates
+        recall = aggregates.get("avg_recall_at_k", {})
+        recall5 = 0.0
+        recall10 = 0.0
+        if isinstance(recall, dict):
+            recall5 = float(recall.get(5, 0.0))
+            recall10 = float(recall.get(10, 0.0))
+        scenario_value = aggregates.get("scenario_count", 0)
+        scenario_count = int(scenario_value) if isinstance(scenario_value, (int, float)) else 0
+        mrr_value = aggregates.get("mean_mrr", 0.0)
+        mrr = float(mrr_value) if isinstance(mrr_value, (int, float)) else 0.0
+        table.add_row(
+            summary.run_id,
+            summary.strategy,
+            f"{scenario_count}",
+            f"{recall5:.2f}",
+            f"{recall10:.2f}",
+            f"{mrr:.3f}",
+        )
+
+    console.print(table)
+
 
 def _load_metrics(metrics_file: Path) -> list[Metrics]:
     text = metrics_file.read_text(encoding="utf-8")
@@ -81,7 +158,7 @@ def _load_metrics(metrics_file: Path) -> list[Metrics]:
         summary = ReportSummary.model_validate(payload)
         metrics = summary.per_scenario
     elif isinstance(payload, list):
-        items = cast(list[Any], payload)
+        items = cast("list[Any]", payload)
         metrics = [Metrics.model_validate(item) for item in items]
     else:
         message = "Metrics input must be JSONL, JSON array, or a serialized ReportSummary."
@@ -90,6 +167,41 @@ def _load_metrics(metrics_file: Path) -> list[Metrics]:
         message = "No metrics found in the provided file."
         raise typer.BadParameter(message)
     return metrics
+
+
+@app.command("run-scenarios")
+def run_scenarios(
+    runs: Path = RUNS_OPTION,
+    scenarios: Path = SCENARIOS_OPTION,
+    output_dir: Path = OUTPUT_DIR_OPTION,
+    env: str | None = _ENV_OPTION,
+) -> None:
+    """Execute experiment runs across all provided scenarios."""
+    env_files = [Path(env)] if env else None
+    run_configs = load_run_configs(runs, env_files=env_files)
+    scenario_configs = load_scenarios(scenarios, env_files=env_files)
+
+    if not run_configs.items:
+        message = "Run configuration file did not contain any runs."
+        raise typer.BadParameter(message)
+    if not scenario_configs.items:
+        message = "Scenario file did not contain any scenarios."
+        raise typer.BadParameter(message)
+
+    runner = ScenarioRunner(
+        run_configs.items,
+        scenario_configs.items,
+        output_dir,
+        log=console.print,
+    )
+    summaries = runner.execute()
+    if not summaries:
+        console.print("[yellow]No runs were executed.[/yellow]")
+        return
+
+    _render_summary_table(summaries)
+    artefact_root = output_dir.resolve()
+    console.print(f"[green]Experiment artefacts written to {artefact_root}[/green]")
 
 
 @app.command()

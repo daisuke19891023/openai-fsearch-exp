@@ -44,7 +44,7 @@ def test_compute_retrieval_metrics_matches_reference_values() -> None:
     ideal_dcg_k2 = 1.0 + 1.0 / math.log2(3)
     assert math.isclose(metrics.ndcg_at_k[2], 1.0 / ideal_dcg_k2, rel_tol=1e-6)
     assert math.isclose(
-        metrics.ndcg_at_k[3], (1.0 + 1.0 / math.log2(4)) / ideal_dcg_k2, rel_tol=1e-6
+        metrics.ndcg_at_k[3], (1.0 + 1.0 / math.log2(4)) / ideal_dcg_k2, rel_tol=1e-6,
     )
 
     assert math.isclose(metrics.mrr, 1.0, rel_tol=1e-6)

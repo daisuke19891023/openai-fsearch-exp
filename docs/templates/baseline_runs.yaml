@@ -1,0 +1,34 @@
+runs:
+  - id: rg-only
+    description: Baseline ripgrep keyword search.
+    model:
+      name: gpt-4.1-mini
+    tools_enabled:
+      - ripgrep
+    tool_limits:
+      max_calls: 1
+    replicate: 1
+  - id: faiss-fixed
+    description: Filename-driven approximation of FAISS with fixed chunking.
+    model:
+      name: gpt-4.1-mini
+    tools_enabled:
+      - vector.faiss
+    chunking:
+      type: fixed
+      size_tokens: 400
+      overlap_tokens: 80
+    replicate: 1
+  - id: hybrid
+    description: Hybrid strategy combining ripgrep, fd, and vector search.
+    model:
+      name: gpt-4.1-mini
+    tools_enabled:
+      - ripgrep
+      - fd
+      - vector.faiss
+    chunking:
+      type: fixed
+      size_tokens: 400
+      overlap_tokens: 80
+    replicate: 1

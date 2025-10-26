@@ -15,6 +15,7 @@ from code_agent_experiments.tools import (
     run_grep,
     run_ripgrep,
 )
+from code_agent_experiments.tools import shell
 
 
 @pytest.fixture
@@ -101,3 +102,37 @@ def test_run_fd_includes_directories_and_respects_limit(sample_repo: Path) -> No
     assert len(unbounded) > 1
     limited = run_fd("test", sample_repo, include_directories=True, limit=1)
     assert len(limited) == 1
+
+
+def test_run_ripgrep_enforces_output_cap(monkeypatch: pytest.MonkeyPatch, sample_repo: Path) -> None:
+    """Ripgrep wrapper stops at the configured output clamp."""
+    monkeypatch.setattr(shell, "MAX_TEXT_MATCHES", 3)
+    target = sample_repo / "src" / "overflow.py"
+    target.write_text("\n".join("TODO" for _ in range(10)), encoding="utf-8")
+
+    matches = run_ripgrep("TODO", sample_repo)
+    assert len(matches) == 3
+
+
+def test_run_fd_enforces_output_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Fd wrapper clamps runaway directory enumerations."""
+    monkeypatch.setattr(shell, "MAX_PATH_RESULTS", 5)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for index in range(20):
+        (repo / f"file_{index}.txt").write_text("hello\n", encoding="utf-8")
+
+    results = run_fd("file", repo)
+    assert len(results) == 5
+
+
+def test_run_find_enforces_output_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Find wrapper clamps runaway directory enumerations."""
+    monkeypatch.setattr(shell, "MAX_PATH_RESULTS", 4)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for index in range(10):
+        (repo / f"nested_{index}.py").write_text("print('hi')\n", encoding="utf-8")
+
+    results = run_find(repo, name="*.py")
+    assert len(results) == 4

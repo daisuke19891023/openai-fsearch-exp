@@ -14,12 +14,12 @@
 - [x] T2-3: Provide grep/find wrappers for baseline comparisons.
 
 ## EP3 – Chunking & Embeddings
-- [ ] T3-1: Implement fixed-token chunker.
-- [ ] T3-2: Implement tree-sitter AST chunker.
-- [ ] T3-3: Implement OpenAI embeddings client with batching and retries.
+- [x] T3-1: Implement fixed-token chunker.
+- [x] T3-2: Implement tree-sitter AST chunker.
+- [x] T3-3: Implement OpenAI embeddings client with batching and retries.
 
 ## EP4 – Vector Backends
-- [ ] T4-1: Build FAISS backend with persistence.
+- [x] T4-1: Build FAISS backend with persistence.
 - [ ] T4-2: Integrate Chroma backend (optional).
 - [ ] T4-3: Integrate pgvector backend (optional).
 

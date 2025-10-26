@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, UTC
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
@@ -11,13 +12,16 @@ from typing import Any, cast
 import typer
 from openai import OpenAI
 from rich.console import Console
+from rich.table import Table
 
 from .agent import AgentsSDKAgent, ResponsesAgent
 from .agent.builtin_tools import create_ripgrep_tool
 from .agent.tooling import ToolRegistry
+from .config import LoadError, load_run_configs, load_scenarios
 from .domain.models import Metrics, ReportSummary, ToolLimits
 from .evaluation.metrics import aggregate_metrics
 from .evaluation.reporting import render_html_report, render_markdown_report
+from .orchestration import ExperimentOrchestrator, ExperimentStorage, default_executor
 
 app = typer.Typer(help="Run single-shot code agent experiments against a repository.")
 console = Console()
@@ -70,6 +74,45 @@ FORMAT_OPTION = typer.Option(
     help="Report output format: 'markdown' or 'html'.",
 )
 
+RUNS_FILE_OPTION = typer.Option(
+    ...,
+    "--runs-file",
+    file_okay=True,
+    dir_okay=False,
+    exists=True,
+    readable=True,
+    resolve_path=True,
+    help="Path to the YAML file containing run configurations.",
+)
+SCENARIOS_FILE_OPTION = typer.Option(
+    ...,
+    "--scenarios-file",
+    file_okay=True,
+    dir_okay=False,
+    exists=True,
+    readable=True,
+    resolve_path=True,
+    help="Path to the YAML file containing scenario definitions.",
+)
+OUTPUT_DIR_OPTION = typer.Option(
+    Path("artifacts"),
+    "--output-dir",
+    "-o",
+    file_okay=False,
+    help="Directory where orchestrator artefacts should be stored.",
+)
+ENV_FILE_OPTION = typer.Option(
+    None,
+    "--env-file",
+    "-e",
+    resolve_path=True,
+    file_okay=True,
+    dir_okay=False,
+    help="Optional .env file(s) applied to both run and scenario templates.",
+)
+
+DEFAULT_EXECUTOR = default_executor
+
 
 def _load_metrics(metrics_file: Path) -> list[Metrics]:
     text = metrics_file.read_text(encoding="utf-8")
@@ -83,7 +126,7 @@ def _load_metrics(metrics_file: Path) -> list[Metrics]:
         summary = ReportSummary.model_validate(payload)
         metrics = summary.per_scenario
     elif isinstance(payload, list):
-        items = cast(list[Any], payload)
+        items = cast("list[Any]", payload)
         metrics = [Metrics.model_validate(item) for item in items]
     else:
         message = "Metrics input must be JSONL, JSON array, or a serialized ReportSummary."
@@ -92,6 +135,110 @@ def _load_metrics(metrics_file: Path) -> list[Metrics]:
         message = "No metrics found in the provided file."
         raise typer.BadParameter(message)
     return metrics
+
+
+def _lookup_metric_value(values: dict[Any, Any] | None, key: int) -> float:
+    """Fetch a metric value for ``key`` from ``values`` handling str/int keys."""
+    if not values:
+        return 0.0
+    if key in values:
+        return float(values[key])
+    str_key = str(key)
+    if str_key in values:
+        return float(values[str_key])
+    return 0.0
+
+
+def _print_strategy_table(comparison: dict[str, dict[str, Any]]) -> None:
+    """Render a Rich table summarising aggregated strategy metrics."""
+    if not comparison:
+        console.print("[yellow]No metrics were produced during the run.[/yellow]")
+        return
+
+    table = Table(title="Strategy Comparison")
+    table.add_column("Strategy", style="bold")
+    table.add_column("Scenarios", justify="right")
+    table.add_column("Mean MRR", justify="right")
+    table.add_column("Recall@5", justify="right")
+    table.add_column("Recall@10", justify="right")
+    table.add_column("Total Tool Calls", justify="right")
+
+    for strategy in sorted(comparison):
+        aggregates = comparison[strategy]
+        scenario_count = int(aggregates.get("scenario_count", 0))
+        mean_mrr = float(aggregates.get("mean_mrr", 0.0) or 0.0)
+        recall_map = aggregates.get("avg_recall_at_k")
+        recall_5 = _lookup_metric_value(recall_map, 5)
+        recall_10 = _lookup_metric_value(recall_map, 10)
+        total_calls = int(aggregates.get("total_tool_calls", 0))
+
+        table.add_row(
+            strategy,
+            str(scenario_count),
+            f"{mean_mrr:.3f}",
+            f"{recall_5:.3f}",
+            f"{recall_10:.3f}",
+            str(total_calls),
+        )
+
+    console.print(table)
+
+
+@app.command("run-scenarios")
+def run_scenarios(
+    runs_file: Path = RUNS_FILE_OPTION,
+    scenarios_file: Path = SCENARIOS_FILE_OPTION,
+    output_dir: Path = OUTPUT_DIR_OPTION,
+    env_file: list[Path] | None = ENV_FILE_OPTION,
+) -> None:
+    """Execute a batch of scenarios across the configured run profiles."""
+    env_files = list(env_file) if env_file else None
+
+    try:
+        run_result = load_run_configs(runs_file, env_files=env_files)
+    except LoadError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    try:
+        scenario_result = load_scenarios(scenarios_file, env_files=env_files)
+    except LoadError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    run_configs = list(run_result.items)
+    scenarios = list(scenario_result.items)
+
+    if not run_configs:
+        message = f"No run configurations found in {runs_file}"
+        raise typer.BadParameter(message)
+    if not scenarios:
+        message = f"No scenarios found in {scenarios_file}"
+        raise typer.BadParameter(message)
+
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    batch_dir = (output_dir / f"run-{timestamp}").resolve()
+
+    storage = ExperimentStorage(batch_dir)
+    orchestrator = ExperimentOrchestrator(DEFAULT_EXECUTOR, storage)
+    result = orchestrator.run(run_configs, scenarios)
+
+    console.print(f"[dim]Runs loaded from {run_result.source}[/dim]")
+    console.print(f"[dim]Scenarios loaded from {scenario_result.source}[/dim]")
+
+    _print_strategy_table(result.comparison)
+    console.print(f"[green]Retrieval records written to {result.records_path}[/green]")
+    console.print(f"[green]Metrics written to {result.metrics_path}[/green]")
+    console.print(f"[green]Comparison summary written to {result.summary_path}[/green]")
+
+    if result.failures:
+        plural = "s" if len(result.failures) != 1 else ""
+        console.print(
+            "[yellow]"
+            f"{len(result.failures)} scenario execution{plural} failed. "
+            f"See {result.failures_path} for details."
+            "[/yellow]",
+        )
+
+    console.print(f"[green]Artefacts stored in {result.output_dir}[/green]")
 
 
 class AgentDriver(str, Enum):

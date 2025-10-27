@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import sqlite3
+
 from code_agent_experiments.domain.models import (
     Candidate,
     Metrics,
@@ -74,6 +76,13 @@ def test_orchestrator_persists_records_and_metrics(tmp_path: Path) -> None:
     assert set(result.per_run) == {"rg-only-rep01", "rg-only-rep02"}
     assert result.comparison["rg-only"]["scenario_count"] == 2
 
+    with sqlite3.connect(storage.db_path) as connection:
+        metrics_count = connection.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]
+        records_count = connection.execute("SELECT COUNT(*) FROM retrieval_records").fetchone()[0]
+
+    assert metrics_count == 2
+    assert records_count == 2
+
 
 def test_orchestrator_records_failures(tmp_path: Path) -> None:
     """Failures are captured and produce empty metrics allowing aggregation."""
@@ -102,3 +111,8 @@ def test_orchestrator_records_failures(tmp_path: Path) -> None:
     failed_metric = next(item for item in metrics_objects if item.run_id.endswith("rep02"))
     assert all(value == 0.0 for value in failed_metric.recall_at_k.values())
     assert result.comparison["rg-only"]["scenario_count"] == 2
+
+    with sqlite3.connect(storage.db_path) as connection:
+        failure_count = connection.execute("SELECT COUNT(*) FROM failures").fetchone()[0]
+
+    assert failure_count == 1

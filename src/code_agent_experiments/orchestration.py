@@ -14,6 +14,7 @@ from code_agent_experiments.domain.models import (
     Scenario,
 )
 from code_agent_experiments.evaluation.metrics import aggregate_metrics, compute_retrieval_metrics
+from code_agent_experiments.storage import FailurePayload, SQLiteExperimentStorage
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,10 +73,12 @@ class ExperimentStorage:
         self.run_configs_path = self.root / "run_configs.json"
         self.scenarios_path = self.root / "scenarios.json"
         self.failures_path = self.root / "failures.jsonl"
+        self._sqlite = SQLiteExperimentStorage(self.root / "experiments.sqlite3")
 
     def prepare(self) -> None:
         """Ensure the output directory exists."""
         self.root.mkdir(parents=True, exist_ok=True)
+        self._sqlite.initialize()
 
     def record_run_configs(self, run_configs: Sequence[RunConfig]) -> None:
         """Persist the provided ``run_configs`` payload to disk."""
@@ -84,6 +87,7 @@ class ExperimentStorage:
             json.dumps(payload, indent=2),
             encoding="utf-8",
         )
+        self._sqlite.upsert_run_configs(run_configs)
 
     def record_scenarios(self, scenarios: Sequence[Scenario]) -> None:
         """Persist the provided ``scenarios`` payload to disk."""
@@ -92,16 +96,19 @@ class ExperimentStorage:
             json.dumps(payload, indent=2),
             encoding="utf-8",
         )
+        self._sqlite.upsert_scenarios(scenarios)
 
     def append_record(self, record: RetrievalRecord) -> None:
         """Append a single retrieval ``record`` to the records log."""
         with self.records_path.open("a", encoding="utf-8") as handle:
             handle.write(record.model_dump_json() + "\n")
+        self._sqlite.insert_retrieval_record(record)
 
     def append_metrics(self, metrics: Metrics) -> None:
         """Append a metrics entry to the metrics log."""
         with self.metrics_path.open("a", encoding="utf-8") as handle:
             handle.write(metrics.model_dump_json() + "\n")
+        self._sqlite.insert_metrics(metrics)
 
     def append_failure(self, failure: FailureRecord) -> None:
         """Append a failure telemetry entry for later inspection."""
@@ -114,6 +121,15 @@ class ExperimentStorage:
                 "timestamp": failure.timestamp.isoformat(),
             }
             handle.write(json.dumps(payload) + "\n")
+        self._sqlite.insert_failure(
+            FailurePayload(
+                run_id=failure.run_id,
+                scenario_id=failure.scenario_id,
+                replicate_index=failure.replicate_index,
+                error=failure.error,
+                timestamp=failure.timestamp,
+            ),
+        )
 
     def write_summary(
         self,
@@ -128,6 +144,11 @@ class ExperimentStorage:
             encoding="utf-8",
         )
         return self.summary_path
+
+    @property
+    def db_path(self) -> Path:
+        """Return the path to the backing SQLite database file."""
+        return self._sqlite.db_path
 
 
 class ExperimentOrchestrator:

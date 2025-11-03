@@ -5,19 +5,33 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Protocol, Sequence
+from pathlib import Path
+import random
+from time import perf_counter
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Protocol, Sequence, cast
 
+from code_agent_experiments.agent.tooling import FunctionToolDefinition, ToolRegistry
 from code_agent_experiments.domain.models import (
+    Candidate,
     Metrics,
     RetrievalRecord,
     RunConfig,
     Scenario,
+    ToolCall,
 )
-from code_agent_experiments.evaluation.metrics import aggregate_metrics, compute_retrieval_metrics
+from code_agent_experiments.domain.tool_schemas import (
+    RipgrepToolInput,
+    RipgrepToolOutput,
+)
+from code_agent_experiments.evaluation.metrics import (
+    aggregate_metrics,
+    compute_retrieval_metrics,
+)
 from code_agent_experiments.storage import FailurePayload, SQLiteExperimentStorage
+from code_agent_experiments.tools.shell import run_ripgrep
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from code_agent_experiments.agent import AgentRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +47,33 @@ class ScenarioExecutor(Protocol):
     ) -> RetrievalRecord:  # pragma: no cover - protocol definition
         """Execute ``scenario`` for ``run_config`` and return a retrieval record."""
         ...
+
+
+class AgentRunner(Protocol):
+    """Protocol for agent implementations used by the scenario executor."""
+
+    def run(self, query: str) -> AgentRunResult:  # pragma: no cover - protocol definition
+        """Execute the retrieval workflow for ``query``."""
+        ...
+
+
+AgentFactory = Callable[
+    [RunConfig, Scenario, Path, ToolRegistry, str],
+    AgentRunner,
+]
+"""Callable responsible for instantiating an agent for a scenario run."""
+
+
+ToolRegistryFactory = Callable[[RunConfig, Scenario, Path], ToolRegistry]
+"""Callable returning a ``ToolRegistry`` for a run/scenario pair."""
+
+
+SystemPromptFactory = Callable[[RunConfig, Scenario, Path], str]
+"""Callable producing the system prompt used to prime the agent."""
+
+
+CandidateExtractor = Callable[[Scenario, Sequence[ToolCall], Path], list[Candidate]]
+"""Callable extracting retrieval candidates from tool telemetry."""
 
 
 @dataclass(slots=True)
@@ -299,6 +340,283 @@ class ExperimentOrchestrator:
         return aggregated
 
 
+class AgentScenarioExecutor:
+    """Execute scenarios by delegating to a configured agent backend."""
+
+    def __init__(
+        self,
+        agent_factory: AgentFactory,
+        *,
+        tool_registry_factory: ToolRegistryFactory | None = None,
+        system_prompt_factory: SystemPromptFactory | None = None,
+        candidate_extractor: CandidateExtractor | None = None,
+    ) -> None:
+        """Store factories controlling agent, tooling, and telemetry extraction."""
+        self._agent_factory = agent_factory
+        self._tool_registry_factory = (
+            tool_registry_factory or _default_tool_registry_factory
+        )
+        self._system_prompt_factory = system_prompt_factory or _default_system_prompt
+        self._candidate_extractor = candidate_extractor or _default_candidate_extractor
+
+    def __call__(
+        self,
+        run_config: RunConfig,
+        scenario: Scenario,
+        replicate_index: int,
+    ) -> RetrievalRecord:
+        """Instantiate the agent, execute the query, and build a record."""
+        repository_root = Path(scenario.repo_path).expanduser().resolve()
+        if not repository_root.exists():
+            message = f"Repository root {repository_root} does not exist"
+            raise FileNotFoundError(message)
+
+        random.seed(run_config.seed + replicate_index)
+
+        tool_registry = self._tool_registry_factory(run_config, scenario, repository_root)
+        system_prompt = self._system_prompt_factory(
+            run_config,
+            scenario,
+            repository_root,
+        )
+        agent = self._agent_factory(
+            run_config,
+            scenario,
+            repository_root,
+            tool_registry,
+            system_prompt,
+        )
+
+        started_at = perf_counter()
+        result = agent.run(scenario.query)
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+
+        candidates = self._candidate_extractor(
+            scenario,
+            result.tool_calls,
+            repository_root,
+        )
+
+        return RetrievalRecord(
+            scenario_id=scenario.id,
+            run_id=run_config.id,
+            strategy=run_config.id,
+            candidates=candidates,
+            tool_calls=list(result.tool_calls),
+            elapsed_ms=elapsed_ms,
+        )
+
+
+def _default_system_prompt(
+    run_config: RunConfig,
+    scenario: Scenario,
+    repository_root: Path,
+) -> str:
+    """Return a concise system prompt anchoring the repository context."""
+    tools_list = ", ".join(run_config.tools_enabled)
+    language = scenario.language or "unspecified"
+    metadata = ", ".join(
+        f"{key}={value}"
+        for key, value in sorted(scenario.metadata.items())
+    )
+    return (
+        "You are a code search assistant helping triage issues in a repository.\n"
+        f"The repository root on disk is: {repository_root}.\n"
+        "Always restrict tool usage to this directory.\n"
+        f"Enabled tools for this run: {tools_list or 'none'}.\n"
+        f"Scenario language hint: {language}.\n"
+        + (
+            f"Scenario metadata: {metadata}.\n"
+            if metadata
+            else ""
+        )
+        + "Focus on retrieving files relevant to the user's query."
+    )
+
+
+def _default_tool_registry_factory(
+    run_config: RunConfig,
+    _scenario: Scenario,
+    repository_root: Path,
+) -> ToolRegistry:
+    """Create a ``ToolRegistry`` aligned with ``run_config`` selections."""
+    tools: list[FunctionToolDefinition[Any, Any]] = []
+    for tool_name in run_config.tools_enabled:
+        if tool_name == "ripgrep":
+            tools.append(_ripgrep_tool_for_repository(repository_root))
+        else:
+            logger.warning(
+                "Tool '%s' is not supported by the scenario executor", tool_name,
+            )
+    if not tools:
+        message = (
+            f"No supported tools enabled for run '{run_config.id}'. "
+            "Supported tools: ripgrep"
+        )
+        raise ValueError(message)
+    return ToolRegistry(tools)
+
+
+def _ripgrep_tool_for_repository(
+    repository_root: Path,
+) -> FunctionToolDefinition[RipgrepToolInput, RipgrepToolOutput]:
+    """Return a ripgrep tool definition scoped to ``repository_root``."""
+
+    def _handler(payload: RipgrepToolInput) -> RipgrepToolOutput:
+        raw_root = Path(payload.root).expanduser()
+        resolved_root = (
+            (repository_root / raw_root).resolve()
+            if not raw_root.is_absolute()
+            else raw_root.resolve()
+        )
+        try:
+            resolved_root.relative_to(repository_root)
+        except ValueError:
+            resolved_root = repository_root
+
+        matches = run_ripgrep(
+            payload.pattern,
+            resolved_root,
+            globs=payload.globs or None,
+            ignore_case=payload.ignore_case,
+            max_count=payload.max_count,
+        )
+        return RipgrepToolOutput.from_runtime(matches, limit=payload.max_count)
+
+    return FunctionToolDefinition(
+        name="ripgrep",
+        description=(
+            "Search repository files using ripgrep-compatible regular expressions."
+        ),
+        input_model=RipgrepToolInput,
+        output_model=RipgrepToolOutput,
+        handler=_handler,
+    )
+
+
+def _default_candidate_extractor(
+    _scenario: Scenario,
+    tool_calls: Sequence[ToolCall],
+    repository_root: Path,
+) -> list[Candidate]:
+    """Aggregate candidates from tool telemetry."""
+    repository_root = repository_root.resolve()
+    aggregated: dict[str, dict[str, Any]] = {}
+    order: dict[str, int] = {}
+    ordinal = 0
+
+    for call in tool_calls:
+        if call.name != "ripgrep":
+            continue
+        for candidate in _parse_ripgrep_candidates(call, repository_root):
+            path = candidate["path"]
+            match_count = candidate["match_count"]
+            truncated = candidate["truncated"]
+            entry = aggregated.setdefault(
+                path,
+                {
+                    "score_keyword": 0.0,
+                    "match_count": 0,
+                    "sources": {},
+                    "truncated": False,
+                },
+            )
+            entry["score_keyword"] += float(match_count)
+            entry["match_count"] += match_count
+            entry["sources"][call.name] = (
+                entry["sources"].get(call.name, 0) + match_count
+            )
+            entry["truncated"] = entry["truncated"] or truncated
+            if path not in order:
+                order[path] = ordinal
+                ordinal += 1
+
+    sorted_items = sorted(
+        aggregated.items(),
+        key=lambda item: (-item[1]["score_keyword"], order[item[0]]),
+    )
+
+    candidates: list[Candidate] = []
+    for rank, (path, data) in enumerate(sorted_items, start=1):
+        features = {
+            "match_count": data["match_count"],
+            "sources": data["sources"],
+            "truncated": data["truncated"],
+        }
+        candidates.append(
+            Candidate(
+                path=path,
+                score_keyword=float(data["score_keyword"]),
+                score_dense=0.0,
+                score_rerank=0.0,
+                rank=rank,
+                features=features,
+            ),
+        )
+    return candidates
+
+
+def _parse_ripgrep_candidates(
+    call: ToolCall,
+    repository_root: Path,
+) -> list[dict[str, Any]]:
+    """Parse ripgrep tool output into candidate summaries."""
+    preview = call.stdout_preview
+    if not preview:
+        return []
+    try:
+        payload = json.loads(preview)
+    except json.JSONDecodeError:
+        logger.warning("Failed to decode ripgrep output for tool call")
+        return []
+
+    raw_matches_obj = payload.get("matches")
+    if not isinstance(raw_matches_obj, list):
+        return []
+
+    raw_matches = cast(list[Any], raw_matches_obj)
+    matches: list[dict[str, Any]] = []
+    for raw_match in raw_matches:
+        if isinstance(raw_match, dict):
+            matches.append(cast(dict[str, Any], raw_match))
+    if not matches:
+        return []
+
+    seen: dict[str, int] = {}
+    order: dict[str, int] = {}
+    ordinal = 0
+    for match in matches:
+        path_value = match.get("path")
+        if not isinstance(path_value, str):
+            continue
+        path = _normalise_candidate_path(path_value, repository_root)
+        seen[path] = seen.get(path, 0) + 1
+        if path not in order:
+            order[path] = ordinal
+            ordinal += 1
+
+    truncated = bool(payload.get("truncated", False))
+    ordered = sorted(seen.items(), key=lambda item: order[item[0]])
+    return [
+        {"path": path, "match_count": count, "truncated": truncated}
+        for path, count in ordered
+    ]
+
+
+def _normalise_candidate_path(path: str, repository_root: Path) -> str:
+    """Return ``path`` relative to ``repository_root`` when possible."""
+    candidate_path = Path(path)
+    if not candidate_path.is_absolute():
+        candidate_path = (repository_root / candidate_path).resolve(strict=False)
+    else:
+        candidate_path = candidate_path.resolve(strict=False)
+    try:
+        relative = candidate_path.relative_to(repository_root)
+        return relative.as_posix()
+    except ValueError:
+        return candidate_path.as_posix()
+
+
 def default_executor(
     run_config: RunConfig,
     scenario: Scenario,
@@ -316,6 +634,7 @@ def default_executor(
 
 
 __all__ = [
+    "AgentScenarioExecutor",
     "ExperimentOrchestrator",
     "ExperimentRunResult",
     "ExperimentStorage",

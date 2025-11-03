@@ -25,7 +25,11 @@ from .domain.models import Metrics, ReportSummary, RetrievalRecord, RunConfig, S
 from .embeddings import OpenAIEmbeddingsClient
 from .evaluation.metrics import aggregate_metrics, compute_retrieval_metrics
 from .evaluation.reporting import render_html_report, render_markdown_report
-from .orchestration import ExperimentOrchestrator, ExperimentStorage, default_executor
+from .orchestration import (
+    AgentScenarioExecutor,
+    ExperimentOrchestrator,
+    ExperimentStorage,
+)
 from .tools import run_fd, run_find, run_grep, run_ripgrep, warn_if_missing_binaries
 from .vector import FaissVectorStore, VectorRecord
 
@@ -209,9 +213,6 @@ MCP_REQUIRED_OPTION = typer.Option(
     "--require",
     help="Environment variables that must be present for MCP connectivity.",
 )
-
-DEFAULT_EXECUTOR = default_executor
-
 
 class EmbeddingClientProtocol(Protocol):
     """Protocol describing the embedding client used by the indexer."""
@@ -755,8 +756,18 @@ def run_scenarios(
     batch_dir = (output_dir / f"run-{timestamp}").resolve()
 
     storage = ExperimentStorage(batch_dir)
-    orchestrator = ExperimentOrchestrator(DEFAULT_EXECUTOR, storage)
-    result = orchestrator.run(run_configs, scenarios)
+    try:
+        executor = _build_cli_executor()
+    except Exception as exc:  # pragma: no cover - defensive
+        console.print(f"[red]Failed to initialise scenario executor: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    orchestrator = ExperimentOrchestrator(executor, storage)
+    try:
+        result = orchestrator.run(run_configs, scenarios)
+    except Exception as exc:  # pragma: no cover - defensive
+        console.print(f"[red]Scenario execution failed: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
     console.print(f"[dim]Runs loaded from {runs_source}[/dim]")
     console.print(f"[dim]Scenarios loaded from {scenarios_source}[/dim]")
@@ -869,6 +880,28 @@ def query(
             "[dim]Trace exported via Agents SDK. Review it in the OpenAI dashboard under "
             f"workflow '{workflow_name}'.[/dim]",
         )
+
+
+def _build_cli_executor() -> AgentScenarioExecutor:
+    """Return the default scenario executor used by the CLI."""
+    client = OpenAI()
+
+    def _factory(
+        run_config: RunConfig,
+        _scenario: Scenario,
+        _repository_root: Path,
+        tool_registry: ToolRegistry,
+        system_prompt: str,
+    ) -> ResponsesAgent:
+        return ResponsesAgent(
+            client,
+            model=run_config.model.name,
+            tool_registry=tool_registry,
+            tool_limits=run_config.tool_limits,
+            system_prompt=system_prompt,
+        )
+
+    return AgentScenarioExecutor(agent_factory=_factory)
 
 
 @app.command()

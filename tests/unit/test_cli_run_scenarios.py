@@ -71,7 +71,10 @@ def test_run_scenarios_generates_comparison_table(
             elapsed_ms=500,
         )
 
-    monkeypatch.setattr("code_agent_experiments.cli.DEFAULT_EXECUTOR", executor)
+    monkeypatch.setattr(
+        "code_agent_experiments.cli._build_cli_executor",
+        lambda: executor,
+    )
 
     output_dir = tmp_path / "artifacts"
     result = runner.invoke(
